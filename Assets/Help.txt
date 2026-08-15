@@ -1,0 +1,21 @@
+﻿NOTEPAD - simple text editor
+
+Opens a desktop window for viewing and editing plain text files.
+
+Menus:
+  File      create, open and save files
+  Settings  change editor font and toggle word wrap
+  Edit      copy and paste
+  Search    Find text (Ctrl+F)
+
+The editor has permanent horizontal and vertical scrollbars. They are
+disabled whenever the current document does not need them.
+
+Usage:
+  NOTEPAD.R4X [file]
+
+  file   optional path of a text file to open on start.
+
+NOTEPAD /? shows this helpfile; it is embedded in the R4M0 container
+of the program and rendered by the terminal without starting the
+editor.
