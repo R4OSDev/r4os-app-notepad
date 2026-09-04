@@ -1,4 +1,5 @@
 const r4os = @import("r4os");
+const std = @import("std");
 const AppApi = struct {
     sys: r4os.r4sys.Context,
     desk: r4os.r4desk.Context,
@@ -230,8 +231,8 @@ const App = struct {
         var info: r4os.abi.GuiWindowInfo = .{};
         _ = self.ctx.desk.guiWindowInfo(&info);
         const canvas = r4os.gui.Canvas.init(&self.ctx.draw, info);
-        self.hosted_w = clampI32(canvas.w, 220, 1600);
-        self.hosted_h = clampI32(canvas.h, 140, 1000);
+        self.hosted_w = hostedExtent(canvas.w, 220);
+        self.hosted_h = hostedExtent(canvas.h, 140);
     }
 
     fn handleHostedKey(self: *App, raw_key: u32, modifiers: u32) void {
@@ -1757,8 +1758,11 @@ fn findTextIndex(value: []const u8, needle: []const u8, start: usize) ?usize {
     return null;
 }
 
-fn clampI32(value: i32, min_value: i32, max_value: i32) i32 {
-    if (value < min_value) return min_value;
-    if (value > max_value) return max_value;
-    return value;
+fn hostedExtent(value: i32, minimum: i32) i32 {
+    return @max(value, minimum);
+}
+
+test "hosted extent preserves full HD client dimensions" {
+    try std.testing.expectEqual(@as(i32, 1920), hostedExtent(1920, 220));
+    try std.testing.expectEqual(@as(i32, 1080), hostedExtent(1080, 140));
 }
