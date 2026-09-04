@@ -1172,7 +1172,10 @@ const App = struct {
             .failure => return,
         };
         defer paint.discard();
-        const canvas = paint.canvas;
+        var frame_commands: [64]r4os.abi.GuiFrameCommand = undefined;
+        var frame_resources: [8 * 1024]u8 = undefined;
+        var frame_canvas: r4os.FrameCanvas = undefined;
+        const canvas = paint.bufferedCanvas(&frame_canvas, frame_commands[0..], frame_resources[0..]);
         var scratch: [scratch_capacity]u8 = .{0} ** scratch_capacity;
         _ = canvas.clear(r4os.gui.default_palette.face);
         const editor_canvas = self.editorCanvas(canvas);
