@@ -5,12 +5,15 @@ Kleine gehostete Desktop-System-App fuer Textdateien.
 
 Build:
 
-    cd Code\System\Software\Notepad
-    ..\..\..\DevTools\Zig\zig.exe build
+    Build.bat
+
+Unter Linux im selben Repository:
+
+    ./Build.sh
 
 Ergebnis:
 
-    Code\System\Software\Notepad\zig-out\NOTEPAD.R4X
+    Artifacts/Modules/Notepad/NOTEPAD.R4X (relativ zum Workspace)
 
 Das Image-Build-Script kopiert diese Datei nach /R4OS/SOFTWARE/DESKTOP/NOTEPAD.R4X ins Boot-Image.
 
@@ -18,11 +21,11 @@ Projektstruktur seit 0.51.20:
 - `build.zig` baut die App als eigenes SDK-Projekt.
 - `build.zig.zon` bindet `r4os_sdk` als Paket.
 - `module.R4MF` beschreibt Artefakt, Zielpfad, R4DESK-/R4DRAW-Imports und Contract.
-- Der zentrale `cd Code`-Build baut weiterhin das Image-Artefakt
-  `Code\zig-out\NOTEPAD.R4X`.
+- Der Workspace-Build ueber Tools/Build.bat beziehungsweise Tools/Build.sh
+  uebernimmt das Besitzerartefakt anhand des gewaehlten Profils.
 
 Contract:
-- R4XStart-Entry: `notepad_main`
+- R4XStart-Entry: SDK-Startschicht mit `r4_app_main`
 - App-Klasse: `gui`
 - R4L-Imports: `R4SYS`, `R4DESK`, `R4DRAW`, `R4NET`, `R4DEV`
 - Zielpfad im Image: `C:\R4OS\SOFTWARE\DESKTOP\NOTEPAD.R4X`
@@ -54,3 +57,8 @@ Aktueller Stand ab 0.62.1:
 
 Der alte Vollbildpfad bleibt als einfacher Kompatibilitaetsfallback erhalten;
 die eigentliche System-App ist der gehostete Desktop-Pfad.
+
+Seit 0.78.11 berechnet ein gemeinsamer TextArea-Durchlauf die sichtbaren
+Zeilen, den Caret und beide Scrollbereiche. Zeichnen und Scrollbars nutzen
+dasselbe begrenzte Ergebnis. Edit, Font-/Umbruch- und Groessenaenderungen
+arbeiten stets mit den aktuellen Textbytes; es gibt keinen langlebigen Index.

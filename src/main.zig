@@ -270,6 +270,7 @@ const App = struct {
             },
             r4os.gui.Key.ctrl_x => blk: {
                 if (self.editor.cutToClipboard(&self.ctx.desk)) {
+                    self.editor.ensureCursorVisible(view);
                     self.dirty = true;
                     self.loaded_truncated = false;
                     self.setStatus("Cut selection");
@@ -1179,9 +1180,11 @@ const App = struct {
         var scratch: [scratch_capacity]u8 = .{0} ** scratch_capacity;
         _ = canvas.clear(r4os.gui.default_palette.face);
         const editor_canvas = self.editorCanvas(canvas);
-        _ = r4os.gui.drawTextAreaExWithWrap(editor_canvas, self.editorTextRect(canvas), scratch[0..], self.editor.value(), self.editor.cursor, self.editor.selectionRange(), self.editor.scroll_line, self.editor.scroll_col, self.word_wrap, self.editor.focused, self.editor.disabled, self.editor.palette);
-        _ = self.verticalScrollbar(editor_canvas).draw(canvas, scratch[0..]);
-        _ = self.horizontalScrollbar(editor_canvas).draw(canvas, scratch[0..]);
+        const view = self.editorViewForCanvas(canvas);
+        const layout = r4os.gui.textAreaLayout(self.editor.value(), self.editor.cursor, view.effectiveWrapCols(), self.editor.scroll_line, view.visible_rows);
+        _ = r4os.gui.drawTextAreaWithLayout(editor_canvas, self.editorTextRect(canvas), scratch[0..], self.editor.value(), self.editor.selectionRange(), self.editor.scroll_col, self.editor.focused, self.editor.disabled, self.editor.palette, &layout);
+        _ = self.verticalScrollbarWithTotal(editor_canvas, layout.total_lines).draw(canvas, scratch[0..]);
+        _ = self.horizontalScrollbarWithTotal(editor_canvas, if (self.word_wrap) 0 else layout.max_columns).draw(canvas, scratch[0..]);
         _ = canvas.rect(self.editorScrollbarCornerRect(canvas), r4os.gui.default_palette.face);
         self.renderStatus(canvas, scratch[0..]);
         _ = canvas.menubar(self.menubar(), scratch[0..]);
@@ -1319,6 +1322,11 @@ const App = struct {
     fn verticalScrollbar(self: *App, canvas: r4os.gui.Canvas) r4os.gui.Scrollbar {
         const view = self.editorViewForCanvas(canvas);
         const total = r4os.gui.textAreaVisualLineCount(self.editor.value(), view.effectiveWrapCols());
+        return self.verticalScrollbarWithTotal(canvas, total);
+    }
+
+    fn verticalScrollbarWithTotal(self: *App, canvas: r4os.gui.Canvas, total: usize) r4os.gui.Scrollbar {
+        const view = self.editorViewForCanvas(canvas);
         return .{
             .rect = self.verticalScrollbarRect(canvas),
             .orientation = .vertical,
@@ -1330,8 +1338,12 @@ const App = struct {
     }
 
     fn horizontalScrollbar(self: *App, canvas: r4os.gui.Canvas) r4os.gui.Scrollbar {
-        const view = self.editorViewForCanvas(canvas);
         const total = if (self.word_wrap) 0 else r4os.gui.textAreaVisualMaxColumns(self.editor.value(), 0);
+        return self.horizontalScrollbarWithTotal(canvas, total);
+    }
+
+    fn horizontalScrollbarWithTotal(self: *App, canvas: r4os.gui.Canvas, total: usize) r4os.gui.Scrollbar {
+        const view = self.editorViewForCanvas(canvas);
         return .{
             .rect = self.horizontalScrollbarRect(canvas),
             .orientation = .horizontal,

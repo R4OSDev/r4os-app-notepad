@@ -4,7 +4,7 @@
 
 ## Package
 
-- Version: `0.1.2`
+- Version: `0.1.8`
 - Image target: `/R4OS/SOFTWARE/DESKTOP/NOTEPAD.R4X`
 - Image scope: `full`
 - Canonical project manifest: `module.R4MF`
@@ -28,6 +28,11 @@ last verified standalone dependency identities; workspace builds use the
 mapped local checkouts.
 
 ## Documentation
+
+Rendering and both scrollbars share one current-document TextArea layout.
+Wrap, font and window changes recompute that bounded layout. Long clipped
+captions use complete measured UTF-8 candidates and logarithmic search
+within each logical line.
 
 Detailed German technical notes from the migration are preserved in
 `DOCUMENTATION.de.txt`. Source-transfer provenance is recorded in
