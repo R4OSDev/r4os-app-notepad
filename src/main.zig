@@ -154,23 +154,22 @@ const App = struct {
         self.updateHostedMetrics();
         self.renderHosted();
 
+        var events = r4os.EventLoop.init(self.ctx.sys, self.ctx.desk, &.{});
         while (!self.quit_requested) {
-            if (self.ctx.sys.programShouldClose() and self.dialog == .none) {
-                self.requestAction(.exit_app);
-            }
-
-            var event: r4os.abi.GuiEvent = .{};
-            while (self.ctx.desk.guiPollEvent(&event) > 0) {
-                self.handleHostedEvent(event);
-                if (self.quit_requested) break;
-            }
-            if (self.quit_requested) break;
             if (self.pending_recent_document) {
                 self.ctx.sys.sleepTicks(1);
                 self.flushPendingRecentDocument();
                 continue;
             }
-            self.ctx.sys.sleepTicks(3);
+            switch (events.wait(r4os.time_contract.timeoutForever())) {
+                .message => |message| {
+                    const event = message.guiEvent() orelse continue;
+                    self.handleHostedEvent(event);
+                },
+                .failure => |raw| return raw,
+                .timed_out => {},
+            }
+            if (self.quit_requested) break;
         }
         return 0;
     }
