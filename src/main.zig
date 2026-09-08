@@ -83,6 +83,7 @@ const FontDialogFocus = enum {
 };
 
 const App = struct {
+    saver: r4os.document_save.Saver = .{},
     ctx: *AppApi,
     editor: Editor = .{},
     menubar_state: r4os.gui.MenubarState = .{},
@@ -502,14 +503,11 @@ const App = struct {
             self.setStatus("Loaded text is truncated; use Save As");
             return false;
         }
-        const written = self.ctx.sys.fileWrite(zptr(self.current_path[0..]), self.editor.value());
-        if (written < 0 or @as(usize, @intCast(written)) != self.editor.value().len) {
-            self.setStatus("Save failed");
-            return false;
-        }
+        const saved = self.saver.save(.{ .sys = self.ctx.sys }, .{ .ptr = zptr(self.current_path[0..]), .len = @intCast(spanZ(self.current_path[0..]).len) }, self.editor.value(), false);
+        self.setStatus(saved.message());
+        if (!saved.committed()) return false;
         self.dirty = false;
         self.loaded_truncated = false;
-        self.setStatus("Saved");
         self.noteRecentDocument();
         return true;
     }
@@ -820,17 +818,14 @@ const App = struct {
                 return;
             }
         }
-        const written = self.ctx.sys.fileWrite(zptr(self.selected_path[0..]), self.editor.value());
-        if (written < 0 or @as(usize, @intCast(written)) != self.editor.value().len) {
-            self.setStatus("Save failed");
-            return;
-        }
+        const saved = self.saver.save(.{ .sys = self.ctx.sys }, .{ .ptr = zptr(self.selected_path[0..]), .len = @intCast(spanZ(self.selected_path[0..]).len) }, self.editor.value(), self.loaded_truncated);
+        self.setStatus(saved.message());
+        if (!saved.committed()) return;
         copyZ(self.current_path[0..], self.selected_path[0..]);
         self.setDirFromPath(spanZ(self.current_path[0..]));
         self.dirty = false;
         self.loaded_truncated = false;
         self.dialog = .none;
-        self.setStatus("Saved");
         self.noteRecentDocument();
         const action = self.pending_action;
         self.pending_action = .none;

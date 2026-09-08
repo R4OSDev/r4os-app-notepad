@@ -51,8 +51,7 @@ Notepad0.1.10 retains the origin of a truncated load across typing, cut and
 paste. Direct Save remains blocked. Save As can turn this prefix into a new
 document only at a missing target; an existing file, alias or failed target
 lookup is rejected. Successful creation publishes the new path and clears
-the prefix origin and Dirty together. Ordinary save replacement is addressed
-separately in0.78.69.
+the prefix origin and Dirty together. Atomic save replacement is described below for 0.78.69.
 
 Loading stages at most32KB of source bytes, including a one-byte EOF probe,
 before changing the visible editor, path, directory, Dirty or prefix state.
@@ -70,3 +69,31 @@ boundary. A short SMP4 console probe uses the actual document methods with
 a private40000-byte file, checks the retained full original and fresh copy,
 and verifies a failed subsequent open. No manual visual check or large
 editor/graphics profile is required.
+
+
+Document saving (0.78.69)
+--------------------------
+Notepad 0.1.11 and Paint 0.1.7 share the SDK document_save.Saver policy.
+Save and Save As first create a private 8.3 sibling (DSxxxxxx.TMP), write
+bounded chunks and confirm the final stream flush. Only then does the
+existing Files.replaceAtomic facade publish the target. An old document is
+never passed to fileWrite. Path, Dirty and recent-file history change only
+after confirmed replacement. A truncated Notepad load also requires the
+target to remain absent at the atomic publication boundary.
+
+A failure before replacement aborts only the exact owned stream. An
+unconfirmed replacement retains the stage and backup for recovery, while
+the app keeps its edited document. A confirmed save with failed backup
+cleanup stays successful and reports the retained backup. The temporary
+names remain in the target directory; there is no direct-write fallback.
+Existing FAT long names can be replaced, but creation of a new FAT long
+name is not supported by the current atomic storage primitive. Such a
+request fails without falling back to an unsafe overwrite.
+
+One host case injects a single short stage write and checks unchanged
+Notepad text, selection, path, Dirty and pending history, no replacement,
+and cleanup of the owned stage. One short SMP4 console probe calls the real
+Notepad methods on private FAT files and the real Paint methods on private
+NTFS files: Save and Save As over existing targets, exact saved bytes,
+metadata and sibling cleanup. It also confirms fresh Save As of a Notepad
+prefix through the create-only atomic path. Both product modules build.
