@@ -271,7 +271,6 @@ const App = struct {
                 if (self.editor.cutToClipboard(&self.ctx.desk)) {
                     self.editor.ensureCursorVisible(view);
                     self.dirty = true;
-                    self.loaded_truncated = false;
                     self.setStatus("Cut selection");
                     break :blk true;
                 }
@@ -281,7 +280,6 @@ const App = struct {
             r4os.gui.Key.ctrl_v => blk: {
                 if (self.editor.pasteFromClipboard(&self.ctx.desk, view)) {
                     self.dirty = true;
-                    self.loaded_truncated = false;
                     self.setStatus("Pasted");
                     break :blk true;
                 }
@@ -292,7 +290,6 @@ const App = struct {
                 const did_change = self.editor.handleCodepointEx(raw_key, (modifiers & modifier_shift) != 0, view);
                 if (did_change and isTextEditingCodepoint(raw_key)) {
                     self.dirty = true;
-                    self.loaded_truncated = false;
                 }
                 break :blk did_change;
             },
@@ -436,7 +433,6 @@ const App = struct {
             @intFromEnum(Command.edit_paste) => {
                 if (self.editor.pasteFromClipboard(&self.ctx.desk, self.editorView())) {
                     self.dirty = true;
-                    self.loaded_truncated = false;
                     self.setStatus("Pasted");
                 } else {
                     self.setStatus("Clipboard empty or text full");
@@ -813,6 +809,17 @@ const App = struct {
             self.setStatus("Path too long");
             return;
         }
+        if (self.loaded_truncated) {
+            // A prefix may become a new document, but must never replace an
+            // existing file (including case, short-name and directory aliases).
+            var target: r4os.abi.FileInfo = .{};
+            if (equalsIgnoreCase(spanZ(self.current_path[0..]), spanZ(self.selected_path[0..])) or
+                self.ctx.sys.fileInfoRaw(zptr(self.selected_path[0..]), &target) != 0)
+            {
+                self.setStatus("Truncated source: choose a new file name");
+                return;
+            }
+        }
         const written = self.ctx.sys.fileWrite(zptr(self.selected_path[0..]), self.editor.value());
         if (written < 0 or @as(usize, @intCast(written)) != self.editor.value().len) {
             self.setStatus("Save failed");
@@ -835,40 +842,44 @@ const App = struct {
     }
 
     fn loadFileWithRecent(self: *App, path_buffer: []const u8, record_recent: bool) bool {
-        self.editor.clear();
-        var read_buffer: [512]u8 = .{0} ** 512;
-        var path_copy: [path_capacity]u8 = .{0} ** path_capacity;
-        copyZ(path_copy[0..], path_buffer);
-        var offset: u32 = 0;
-        var failed = false;
-        while (self.editor.available() > 0) {
-            const want = @min(read_buffer.len, self.editor.available());
-            const read = self.ctx.sys.fileReadAt(zptr(path_copy[0..]), offset, read_buffer[0..want]);
-            if (read < 0) {
-                failed = true;
-                break;
-            }
-            if (read == 0) break;
-            const len: usize = @intCast(read);
-            _ = self.editor.insertSlice(read_buffer[0..len], self.editorView());
-            offset += @intCast(len);
-            if (len < want) break;
-        }
-
-        if (failed) {
-            self.editor.clear();
-            self.pending_recent_document = false;
-            self.setStatus("Open failed");
+        const path = spanZ(path_buffer);
+        if (path.len == 0 or path.len >= path_capacity) {
+            self.setStatus("Open path invalid or too long");
             return false;
         }
+        var path_copy: [path_capacity]u8 = .{0} ** path_capacity;
+        copyZ(path_copy[0..], path_buffer);
+        // One bounded candidate, separate from the visible document. Count
+        // input bytes, since the text widget may discard CR/control bytes.
+        var candidate: [editor_capacity]u8 = undefined;
+        var offset: usize = 0;
+        const limit = self.editor.maxTextLen();
+        while (offset < limit) {
+            const want = @min(@as(usize, 512), limit - offset);
+            const read = self.ctx.sys.fileReadAt(zptr(path_copy[0..]), @intCast(offset), candidate[offset .. offset + want]);
+            if (read < 0 or read > want) {
+                self.setStatus("Open failed");
+                return false;
+            }
+            if (read == 0) break;
+            offset += @intCast(read);
+        }
+        var truncated = false;
+        if (offset == limit) {
+            // Confirm EOF independently of optional or stale file metadata.
+            const more = self.ctx.sys.fileReadAt(zptr(path_copy[0..]), @intCast(offset), candidate[limit .. limit + 1]);
+            if (more < 0 or more > 1) {
+                self.setStatus("Open failed");
+                return false;
+            }
+            truncated = more != 0;
+        }
 
+        self.editor.set(candidate[0..offset]);
         copyZ(self.current_path[0..], path_copy[0..]);
         self.setDirFromPath(spanZ(self.current_path[0..]));
         self.dirty = false;
-        self.loaded_truncated = false;
-        if (self.ctx.sys.fileInfo(zptr(path_copy[0..]))) |info| {
-            self.loaded_truncated = info.size > offset;
-        }
+        self.loaded_truncated = truncated;
         self.editor.focused = true;
         self.editor.ensureCursorVisible(self.editorView());
         self.setStatus(if (self.loaded_truncated) "Opened truncated at 32 KB limit" else "Opened file");
@@ -924,7 +935,6 @@ const App = struct {
                 const pending = self.pending_action;
                 self.pending_action = .none;
                 self.dialog = .none;
-                self.dirty = false;
                 self.performAction(pending);
             },
             .cancel => self.closeDialog("Cancelled"),

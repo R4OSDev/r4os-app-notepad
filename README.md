@@ -43,3 +43,30 @@ Detailed German technical notes from the migration are preserved in
 Original R4OS material is licensed under Apache License 2.0. See `LICENSE`
 and `NOTICE`. Any repository-specific external material is documented in
 `THIRD_PARTY_NOTICES.md`.
+
+
+Notepad document loading (0.78.68)
+----------------------------------
+Notepad0.1.10 retains the origin of a truncated load across typing, cut and
+paste. Direct Save remains blocked. Save As can turn this prefix into a new
+document only at a missing target; an existing file, alias or failed target
+lookup is rejected. Successful creation publishes the new path and clears
+the prefix origin and Dirty together. Ordinary save replacement is addressed
+separately in0.78.69.
+
+Loading stages at most32KB of source bytes, including a one-byte EOF probe,
+before changing the visible editor, path, directory, Dirty or prefix state.
+It does not infer completion from optional file metadata. Any read failure
+preserves the old document including selection, view and pending recent-file
+state. Discarding a save prompt before opening another file does not mark the
+old document clean while the new file is still unconfirmed. Only successful
+load, New or a successful Save As to a fresh file resets load provenance.
+Counting raw input also bounds files made of filtered text-control bytes;
+the normal editor retains its32KB buffer with32767 usable text bytes.
+
+Three focused host groups cover editing and Save As guards, a failure after
+the first512-byte read, state preservation, normalization and the exact EOF
+boundary. A short SMP4 console probe uses the actual document methods with
+a private40000-byte file, checks the retained full original and fresh copy,
+and verifies a failed subsequent open. No manual visual check or large
+editor/graphics profile is required.

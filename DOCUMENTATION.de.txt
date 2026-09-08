@@ -52,7 +52,8 @@ Aktueller Stand ab 0.62.1:
   Metriken der neuen Groesse.
 - Textdateien werden bis zum statischen 32-KB-Editorlimit geladen; groessere
   Dateien werden sichtbar als trunciert markiert. Direktes Ueberschreiben
-  truncierter Dateien wird blockiert, Save As bleibt bewusst moeglich.
+  truncierter Dateien bleibt auch nach Bearbeitungen blockiert. Save As
+  verlangt in diesem Fall einen neuen, noch nicht vorhandenen Dateinamen.
 - Seit R4X v2 wird kein Stack-Budget mehr im Header gesetzt.
 
 Der alte Vollbildpfad bleibt als einfacher Kompatibilitaetsfallback erhalten;
@@ -62,3 +63,24 @@ Seit 0.78.11 berechnet ein gemeinsamer TextArea-Durchlauf die sichtbaren
 Zeilen, den Caret und beide Scrollbereiche. Zeichnen und Scrollbars nutzen
 dasselbe begrenzte Ergebnis. Edit, Font-/Umbruch- und Groessenaenderungen
 arbeiten stets mit den aktuellen Textbytes; es gibt keinen langlebigen Index.
+
+
+Dokumentzustand ab 0.78.68 / Notepad0.1.10
+----------------------------------------
+Ein neuer Dateiinhalt wird zunaechst getrennt in einem begrenzten Kandidaten
+vorbereitet. Lesen, EOF-Nachweis und Pfadlaenge muessen erfolgreich sein,
+bevor Editor, Pfad, Dirty und Kuerzungsherkunft gemeinsam wechseln. Ein
+spaeterer Lesefehler laesst Text, Auswahl, Ansicht und Metadaten des bisherigen
+Dokuments erhalten. Nach einem verworfenen Save-Prompt bleibt der alte
+Dirty-Status bis zum erfolgreichen Dateiwechsel erhalten.
+
+Bearbeiten, Cut und Paste heben die Kuerzungsmarkierung nicht auf. Direktsave
+ist weiter blockiert; Save As einer gekuerzten Ladung benoetigt ein neues,
+noch nicht vorhandenes Ziel. Ein bestehendes Ziel, Alias oder fehlerhafter
+Lookup wird vor dem Schreiben abgewiesen. Nur ein erfolgreicher neuer Save
+As, eine vollstaendige Ladung oder New bilden eine neue geeignete Grundlage.
+Der Rohbyte-Puffer samt1-Byte-EOF-Probe begrenzt auch viele weggefilterte
+Steuerzeichen auf insgesamt32KB gelesene Daten. Der Editor speichert32767
+Textbytes plus Abschluss. Atomarer Save-Ersatz folgt getrennt in0.78.69.
+Drei kleine Hostgruppen und ein kurzer SMP4-Dateifall pruefen die Zustaende;
+die vorhandenen Font-/Grafikprofile werden dafuer nicht wiederholt.
