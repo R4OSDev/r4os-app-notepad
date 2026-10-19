@@ -4,7 +4,7 @@
 
 ## Package
 
-- Version: `0.1.8`
+- Version: `0.1.13`
 - Image target: `/R4OS/SOFTWARE/DESKTOP/NOTEPAD.R4X`
 - Image scope: `full`
 - Canonical project manifest: `module.R4MF`
@@ -12,13 +12,17 @@
 The manifest is the single source of truth for the artifact, imports, image
 target, and package metadata.
 
+Normal background instances declare `runtime.parallel=owned-v1`; editor,
+file dialogs and the synchronous atomic document saver belong to that instance.
+All GUI work remains on its single main-thread producer.
+
 ## Build
 
 On Windows:
 
     Build.bat
 
-On Linux or macOS:
+On Linux:
 
     ./Build.sh
 
