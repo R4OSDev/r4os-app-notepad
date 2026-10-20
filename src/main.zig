@@ -880,7 +880,11 @@ const App = struct {
             truncated = more != 0;
         }
 
-        self.editor.set(candidate[0..offset]);
+        const prefix = r4os.bounded_text.loadPrefix(candidate[0 .. offset + @as(usize, if (truncated) 1 else 0)], limit, truncated) orelse {
+            self.setStatus("Open failed: invalid UTF8");
+            return false;
+        };
+        self.editor.set(candidate[0..prefix]);
         copyZ(self.current_path[0..], path_copy[0..]);
         self.setDirFromPath(spanZ(self.current_path[0..]));
         self.dirty = false;
@@ -1794,6 +1798,7 @@ test "hosted extent preserves full HD client dimensions" {
 }
 
 fn checkDialogText(app: *App) !void {
+    if (!r4os.gui.checkGraphemeEditing()) return error.GraphemeEditing;
     app.dialog = .save_as;
     app.setSaveName("ä");
     app.handleFileDialogKey(r4os.gui.Key.backspace);

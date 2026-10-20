@@ -119,3 +119,7 @@ row identity, failure-state preservation and cleanup; Notepad checks actual
 search values too. It does not claim a manual visual GUI acceptance.
 Find preloads the whole editor selection or reports failure and retains the
 previous query. Search input, replacement and Backspace preserve full scalars.
+
+0.85.44: Rebuilt with SDK0.64.57 and the shared R4STD Unicode17.0.0
+extended grapheme editing boundaries. Byte offsets, scalar font advances
+and grapheme clusters are distinct; no shaping or BiDi support is implied.
