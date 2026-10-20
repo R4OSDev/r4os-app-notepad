@@ -4,7 +4,7 @@
 
 ## Package
 
-- Version: `0.1.13`
+- Version: `0.1.14`
 - Image target: `/R4OS/SOFTWARE/DESKTOP/NOTEPAD.R4X`
 - Image scope: `full`
 - Canonical project manifest: `module.R4MF`
@@ -67,7 +67,7 @@ load, New or a successful Save As to a fresh file resets load provenance.
 Counting raw input also bounds files made of filtered text-control bytes;
 the normal editor retains its32KB buffer with32767 usable text bytes.
 
-Three focused host groups cover editing and Save As guards, a failure after
+Historical0.78.68 verification covered editing and Save As guards, a failure after
 the first512-byte read, state preservation, normalization and the exact EOF
 boundary. A short SMP4 console probe uses the actual document methods with
 a private40000-byte file, checks the retained full original and fresh copy,
@@ -101,3 +101,21 @@ Notepad methods on private FAT files and the real Paint methods on private
 NTFS files: Save and Save As over existing targets, exact saved bytes,
 metadata and sibling cleanup. It also confirms fresh Save As of a Notepad
 prefix through the create-only atomic path. Both product modules build.
+
+Unicode dialog contract (0.85.43)
+--------------------------------
+Save-as fields accept complete Unicode scalar events and keep separate byte
+cursor/selection positions. Invalid or overlong preloads and failed insertions
+preserve the previous input; a rejected filename cannot be saved until edited
+or replaced by a valid selection. Initial path arguments and constructed paths
+are checked in full, before copying or filesystem access. Directory labels may
+show a whole-scalar prefix plus ...; the stored full path alone identifies a row.
+Glyph coverage is independent of text input. No normalization, grapheme, Bidi
+or shaping promise follows from these scalar operations.
+Build.sh test (Build.bat test on Windows) exercises the actual app dialog owner.
+Tests/DialogText is an explicit IMAGE_SCOPE=none console fixture of the same app
+source. /DIALOGTEST additionally verifies real private file saves, full Unicode
+row identity, failure-state preservation and cleanup; Notepad checks actual
+search values too. It does not claim a manual visual GUI acceptance.
+Find preloads the whole editor selection or reports failure and retains the
+previous query. Search input, replacement and Backspace preserve full scalars.
