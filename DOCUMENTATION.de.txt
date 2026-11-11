@@ -104,3 +104,20 @@ aber keine neuen langen Namen atomar anlegen. Dieser Fall wird ohne
 Direktfallback abgewiesen; die vollstaendige Zwischenkopie bleibt erhalten.
 Ein kurzer Hostfall mit genau einem absichtlich unvollstaendigen Schreiben
 sowie ein SMP4-Gastfall fuer Save/Save As beider Apps pruefen den Vertrag.
+
+Fortschreibung 0.90.73 / Notepad0.1.20
+------------------------------------
+Notepad verwendet App2, Query2 und das Generation2-Zigprofil. Dokumente
+werden privat ueber den gemeinsamen Metadaten-/Streambesitzer geladen.
+Die Dateiauswahl nutzt FilePickerSession mit getrennten Labels und ganzen
+Pfadidentitaeten. Vor einer Auswahl werden Cursor und Identitaet geprueft.
+Kopieren und Ausschneiden publizieren typisierte UTF8-Angebote. Einfuegen
+gibt den Snapshot vor der Dokumentaenderung bestaetigt frei und prueft die
+ganze Darstellung vor dem Loeschen einer Auswahl. Textmetriken und Treffer
+verwenden dieselben Graphemgrenzen. Vorhandene Encoding-, Undo- und
+atomare Speicherverfahren bleiben die fachlichen Besitzer.
+Die echte WINSVC-Kompositionsabfrage meldet aktuell NoProvider. Fokus-,
+Dokument-, Font- und Dialogwechsel verwerfen lokale Kompositionszustaende.
+Ein fehlender Anbieter veraendert keine Dokumentbytes.
+./Build.sh test prueft die bestehende Host-Dialoggrenze. NPDTEXT /DIALOGTEST
+und /SELFTEST sind die bestehenden nativen Console-Testeinstiege.

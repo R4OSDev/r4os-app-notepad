@@ -1,19 +1,17 @@
 const r4os = @import("r4os");
 const std = @import("std");
 const AppApi = struct {
+    app: *const r4os.App2,
     sys: r4os.r4sys.Context,
     desk: r4os.r4desk.Context,
     draw: r4os.r4draw.Context,
-    net: r4os.r4net.Context,
-    dev: r4os.r4dev.Context,
 
-    fn init(r4_app: *r4os.App) ?AppApi {
+    fn init(r4_app: *r4os.App2) ?AppApi {
         return .{
+            .app = r4_app,
             .sys = r4_app.system(),
             .desk = r4_app.desktop() orelse return null,
             .draw = r4_app.drawing() orelse return null,
-            .net = r4_app.networkLowLevel() orelse return null,
-            .dev = r4_app.devicesLowLevel() orelse return null,
         };
     }
 };
@@ -84,6 +82,12 @@ const FontDialogFocus = enum {
 
 const App = struct {
     saver: r4os.document_save.Saver = .{},
+    clipboard: r4os.gui.TextClipboard = .{},
+    clipboard_status: i32 = 0,
+    composition: r4os.text_composition.Owner = .{ .owner_generation = 1 },
+    composition_client: ?r4os.text_composition_client.Client = null,
+    composition_status: i32 = r4os.abi.composition_error_unsupported,
+    text_revision: u64 = 1,
     ctx: *AppApi,
     editor: Editor = .{},
     menubar_state: r4os.gui.MenubarState = .{},
@@ -150,6 +154,8 @@ const App = struct {
     }
 
     fn runHosted(self: *App) i32 {
+        self.probeComposition();
+        self.setStatus("Ready");
         _ = self.ctx.desk.guiSetTitle("Notepad");
         _ = self.ctx.desk.guiSetMinSize(440, 280);
         self.updateHostedMetrics();
@@ -190,6 +196,7 @@ const App = struct {
             }
             if (key == r4os.gui.Key.escape) break;
             if (self.editor.handleKey(key, r4os.gui.TextAreaView.init(120, 40))) {
+                self.invalidateComposition();
                 self.dirty = true;
                 self.drawFullscreenFallback();
             }
@@ -209,12 +216,14 @@ const App = struct {
         switch (kind) {
             .close => self.requestAction(.exit_app),
             .resize => {
+                self.invalidateComposition();
                 self.updateHostedMetrics();
                 self.editor.ensureCursorVisible(self.editorView());
                 self.renderHosted();
             },
             .key_down => self.handleHostedKey(r4os.gui.eventCodepoint(event), event.modifiers),
             .input_reset, .focus_lost => {
+                self.invalidateComposition();
                 const repaint = self.text_selecting or self.dialog_pressed_action != .none or self.menubar_state.isOpen();
                 self.text_selecting = false;
                 self.dialog_pressed_action = .none;
@@ -225,6 +234,7 @@ const App = struct {
             .mouse_up => self.handleMouseUp(event.x, event.y),
             .mouse_move => self.handleMouseMove(event.x, event.y, event.buttons),
             .font_changed => {
+                self.invalidateComposition();
                 self.loadFonts();
                 self.editor.ensureCursorVisible(self.editorView());
                 self.setStatus("System fonts updated");
@@ -269,25 +279,27 @@ const App = struct {
         const view = self.editorView();
         const changed = switch (key) {
             r4os.gui.Key.ctrl_c => blk: {
-                if (self.editor.copyToClipboard(&self.ctx.desk)) {
+                if (self.copyEditor()) {
                     self.setStatus("Copied selection");
                     break :blk true;
                 }
-                self.setStatus("No selection");
+                self.clipboardFailure("No selection");
                 break :blk false;
             },
             r4os.gui.Key.ctrl_x => blk: {
-                if (self.editor.cutToClipboard(&self.ctx.desk)) {
+                if (self.cutEditor()) {
                     self.editor.ensureCursorVisible(view);
+                    self.invalidateComposition();
                     self.dirty = true;
                     self.setStatus("Cut selection");
                     break :blk true;
                 }
-                self.setStatus("No selection");
+                self.clipboardFailure("No selection");
                 break :blk false;
             },
             r4os.gui.Key.ctrl_v => blk: {
-                if (self.editor.pasteFromClipboard(&self.ctx.desk, view)) {
+                if (self.pasteEditor(view)) {
+                    self.invalidateComposition();
                     self.dirty = true;
                     self.setStatus("Pasted");
                     break :blk true;
@@ -298,6 +310,7 @@ const App = struct {
             else => blk: {
                 const did_change = self.editor.handleCodepointEx(raw_key, (modifiers & modifier_shift) != 0, view);
                 if (did_change and isTextEditingCodepoint(raw_key)) {
+                    self.invalidateComposition();
                     self.dirty = true;
                 }
                 break :blk did_change;
@@ -403,7 +416,12 @@ const App = struct {
         if (!editor_rect.contains(x, y)) return null;
         const editor_canvas = self.editorCanvas(canvas);
         const text_rect = r4os.gui.textAreaClientRect(editor_rect);
-        return self.editor.hitTest(x - text_rect.x, y - text_rect.y, editor_canvas.font.max_advance, editor_canvas.font.line_height, self.editorViewForCanvas(editor_canvas));
+        var index: usize = 0;
+        if (self.editor.hitTestChecked(editor_canvas, x - text_rect.x, y - text_rect.y, self.editorViewForCanvas(editor_canvas), &index) != 0) {
+            self.setStatus("Text measurement unavailable");
+            return null;
+        }
+        return index;
     }
 
     fn handleScrollbarMouseDown(self: *App, canvas: r4os.gui.Canvas, x: i32, y: i32) bool {
@@ -433,14 +451,15 @@ const App = struct {
             @intFromEnum(Command.file_save_as) => self.openFileDialog(.save_as),
             @intFromEnum(Command.file_exit) => self.requestAction(.exit_app),
             @intFromEnum(Command.edit_copy) => {
-                if (self.editor.copyToClipboard(&self.ctx.desk)) {
+                if (self.copyEditor()) {
                     self.setStatus("Copied selection");
                 } else {
-                    self.setStatus("No selection");
+                    self.clipboardFailure("No selection");
                 }
             },
             @intFromEnum(Command.edit_paste) => {
-                if (self.editor.pasteFromClipboard(&self.ctx.desk, self.editorView())) {
+                if (self.pasteEditor(self.editorView())) {
+                    self.invalidateComposition();
                     self.dirty = true;
                     self.setStatus("Pasted");
                 } else {
@@ -483,6 +502,7 @@ const App = struct {
     }
 
     fn newDocument(self: *App) void {
+        self.invalidateComposition();
         self.editor.clear();
         self.editor.focused = true;
         zero(self.current_path[0..]);
@@ -521,6 +541,7 @@ const App = struct {
     }
 
     fn openFileDialog(self: *App, mode: DialogMode) void {
+        self.invalidateComposition();
         if (mode == .save_as) {
             if (self.current_path[0] != 0) {
                 self.setSaveName(baseName(spanZ(self.current_path[0..])));
@@ -772,6 +793,10 @@ const App = struct {
 
     fn resolveDirEntry(self: *App, index: usize) i32 {
         if (index >= self.directory_page.count) return -1;
+        if (self.directory_page.verify(.{ .sys = self.ctx.sys }, index) != 0) {
+            self.setStatus("Directory changed; reopen the page");
+            return -1;
+        }
         const row = &self.directory_page.rows[index];
         setZ(self.selected_path[0..], spanZ(row.path[0..]));
         return switch (row.kind) {
@@ -827,9 +852,12 @@ const App = struct {
         if (self.loaded_truncated) {
             // A prefix may become a new document, but must never replace an
             // existing file (including case, short-name and directory aliases).
-            var target: r4os.abi.FileInfo = .{};
+            const absent = switch (r4os.metadata2.info(&self.ctx.app.context, zptr(self.selected_path[0..]))) {
+                .missing => true,
+                else => false,
+            };
             if (equalsIgnoreCase(spanZ(self.current_path[0..]), spanZ(self.selected_path[0..])) or
-                self.ctx.sys.fileInfoRaw(zptr(self.selected_path[0..]), &target) != 0)
+                !absent)
             {
                 self.setStatus("Truncated source: choose a new file name");
                 return;
@@ -864,33 +892,23 @@ const App = struct {
         // One bounded candidate, separate from the visible document. Count
         // input bytes, since the text widget may discard CR/control bytes.
         var candidate: [editor_capacity]u8 = undefined;
-        var offset: usize = 0;
+        const files: r4os.Files = .{ .sys = self.ctx.sys };
+        const observed = switch (files.readDocumentPrefix(.{ .ptr = zptr(path_copy[0..]), .len = @intCast(spanZ(path_copy[0..]).len) }, &candidate, r4os.time_contract.timeoutFinite(.{ .nanoseconds = 5_000_000_000 }))) {
+            .value => |value| value,
+            .failure => {
+                self.setStatus("Open failed");
+                return false;
+            },
+        };
         const limit = self.editor.maxTextLen();
-        while (offset < limit) {
-            const want = @min(@as(usize, 512), limit - offset);
-            const read = self.ctx.sys.fileReadAt(zptr(path_copy[0..]), @intCast(offset), candidate[offset .. offset + want]);
-            if (read < 0 or read > want) {
-                self.setStatus("Open failed");
-                return false;
-            }
-            if (read == 0) break;
-            offset += @intCast(read);
-        }
-        var truncated = false;
-        if (offset == limit) {
-            // Confirm EOF independently of optional or stale file metadata.
-            const more = self.ctx.sys.fileReadAt(zptr(path_copy[0..]), @intCast(offset), candidate[limit .. limit + 1]);
-            if (more < 0 or more > 1) {
-                self.setStatus("Open failed");
-                return false;
-            }
-            truncated = more != 0;
-        }
+        const truncated = observed.truncated;
+        const offset = if (truncated) limit else observed.bytes;
 
         const prefix = r4os.bounded_text.loadPrefix(candidate[0 .. offset + @as(usize, if (truncated) 1 else 0)], limit, truncated) orelse {
             self.setStatus("Open failed: invalid UTF8");
             return false;
         };
+        self.invalidateComposition();
         self.editor.set(candidate[0..prefix]);
         copyZ(self.current_path[0..], path_copy[0..]);
         self.setDirFromPath(spanZ(self.current_path[0..]));
@@ -967,6 +985,7 @@ const App = struct {
     }
 
     fn openFindDialog(self: *App) void {
+        self.invalidateComposition();
         const selection = self.editor.selectionRange();
         if (!selection.isEmpty() and !self.find_text.setExact(self.editor.value()[selection.start..selection.end])) {
             self.setStatus("Search selection too long; input retained");
@@ -1217,7 +1236,8 @@ const App = struct {
         const editor_canvas = self.editorCanvas(canvas);
         const view = self.editorViewForCanvas(canvas);
         const layout = r4os.gui.textAreaLayout(self.editor.value(), self.editor.cursor, view.effectiveWrapCols(), self.editor.scroll_line, view.visible_rows);
-        _ = r4os.gui.drawTextAreaWithLayout(editor_canvas, self.editorTextRect(canvas), scratch[0..], self.editor.value(), self.editor.selectionRange(), self.editor.scroll_col, self.editor.focused, self.editor.disabled, self.editor.palette, &layout);
+        const drawn = r4os.gui.drawTextAreaWithLayout(editor_canvas, self.editorTextRect(canvas), scratch[0..], self.editor.value(), self.editor.selectionRange(), self.editor.scroll_col, self.editor.focused, self.editor.disabled, self.editor.palette, &layout);
+        if (drawn < 0) self.setStatus("Text rendering unavailable. Document retained");
         _ = self.verticalScrollbarWithTotal(editor_canvas, layout.total_lines).draw(canvas, scratch[0..]);
         _ = self.horizontalScrollbarWithTotal(editor_canvas, if (self.word_wrap) 0 else layout.max_columns).draw(canvas, scratch[0..]);
         _ = canvas.rect(self.editorScrollbarCornerRect(canvas), r4os.gui.default_palette.face);
@@ -1519,8 +1539,101 @@ const App = struct {
         }
     }
 
+    fn invalidateComposition(self: *App) void {
+        _ = self.composition.cancel(self.composition.id);
+        self.text_revision +|= 1;
+    }
+
+    fn probeComposition(self: *App) void {
+        if (self.composition_client == null) {
+            var client: r4os.text_composition_client.Client = undefined;
+            self.composition_status = self.ctx.app.compositionClient(self.ctx.sys.ticksFromMilliseconds(500), &client);
+            if (self.composition_status != 0) return;
+            self.composition_client = client;
+        }
+        const client = &self.composition_client.?;
+        var capability: r4os.abi.CompositionCapabilityReply = .{};
+        self.composition_status = client.capability(&capability);
+        if (self.composition_status != 0) return;
+        var focus: r4os.abi.CompositionFocus = .{};
+        const available = r4os.text_composition.providerStatus(capability.provider);
+        if (available == 0) {
+            var handle: r4os.abi.ProgramProcessHandle = .{};
+            self.composition_status = self.ctx.sys.programOpenHandle(@intCast(self.ctx.app.startContext().instance_id), &handle);
+            if (self.composition_status != 0) return;
+            const window_id = self.ctx.desk.programWindowId();
+            if (window_id < 0) {
+                self.composition_status = r4os.abi.composition_error_no_focus;
+                return;
+            }
+            var window = r4os.window_mode.Client{ .owner = handle, .window_id = @intCast(window_id) };
+            if (!window.poll(&self.ctx.sys)) {
+                self.composition_status = window.last_error;
+                return;
+            }
+            var reply: r4os.abi.CompositionFocusReply = .{};
+            self.composition_status = client.focus(&window.state.identity, &reply);
+            if (self.composition_status != 0) return;
+            if (reply.result != 0) {
+                self.composition_status = reply.result;
+                return;
+            }
+            focus = reply.focus;
+        }
+        var id: r4os.text_composition.Id = undefined;
+        self.composition_status = self.editor.beginComposition(&self.composition, &focus, &capability.provider, self.text_revision, &r4os.abi.CompositionCaret{}, &id);
+    }
+
+    fn copyEditor(self: *App) bool {
+        if (!self.editor.hasSelection()) {
+            self.clipboard_status = r4os.abi.clipboard_offer_error_not_found;
+            return false;
+        }
+        self.clipboard_status = self.clipboard.connect(&self.ctx.sys);
+        if (self.clipboard_status != 0) return false;
+        self.clipboard_status = self.clipboard.copy(self.editor.selectedValue());
+        return self.clipboard_status == 0;
+    }
+
+    fn cutEditor(self: *App) bool {
+        if (!self.copyEditor()) return false;
+        return self.editor.deleteSelection();
+    }
+
+    fn pasteEditor(self: *App, view: r4os.gui.TextAreaView) bool {
+        self.clipboard_status = self.clipboard.connect(&self.ctx.sys);
+        if (self.clipboard_status != 0) return false;
+        const buffer = self.ctx.sys.allocator().alloc(u8, editor_capacity) catch {
+            self.clipboard_status = r4os.abi.clipboard_offer_error_too_large;
+            return false;
+        };
+        defer self.ctx.sys.allocator().free(buffer);
+        const count = self.clipboard.read(buffer);
+        self.clipboard_status = if (count < 0) count else 0;
+        if (count <= 0) return false;
+        if (!self.editor.pasteSliceChecked(buffer[0..@intCast(count)], view)) {
+            self.clipboard_status = r4os.abi.clipboard_offer_error_too_large;
+            return false;
+        }
+        return true;
+    }
+
+    fn clipboardFailure(self: *App, empty: []const u8) void {
+        if (self.clipboard_status == 0 or self.clipboard_status == r4os.abi.clipboard_offer_error_not_found) {
+            self.setStatus(empty);
+            return;
+        }
+        var message: [status_capacity]u8 = undefined;
+        self.setStatus(std.fmt.bufPrint(&message, "Clipboard failed ({d})", .{self.clipboard_status}) catch "Clipboard failed");
+    }
+
     fn setStatus(self: *App, message: []const u8) void {
-        setZ(self.hosted_status[0..], message);
+        var combined: [status_capacity * 2]u8 = undefined;
+        const value = if (self.composition_status == r4os.abi.composition_error_no_provider)
+            std.fmt.bufPrint(&combined, "{s} | IME unavailable", .{message}) catch message
+        else
+            message;
+        _ = r4os.bounded_text.labelZ(self.hosted_status[0..], value);
     }
 };
 
@@ -1552,12 +1665,17 @@ fn buildAppMenus(out: *AppMenus, word_wrap: bool) []const r4os.gui.MenubarMenu {
     return out.menus[0..];
 }
 
-pub fn r4_app_main(r4_app: *r4os.App) i32 {
+pub fn r4_app_main(r4_app: *r4os.App2) i32 {
     var ctx = AppApi.init(r4_app) orelse return r4os.abi.err_no_group;
     if (std.ascii.eqlIgnoreCase(std.mem.trim(u8, std.mem.span(ctx.sys.argsRaw()), " \t\r\n"), "/DIALOGTEST")) return runDialogTextSelfTest(&ctx);
     if (hasArg(ctx.sys.argsRaw(), "/SELFTEST")) return runFontChoiceSelfTest(&ctx);
     var app = App{ .ctx = &ctx };
     app.init();
+    defer _ = app.clipboard.close();
+    defer {
+        _ = app.composition.cancel(app.composition.id);
+        if (app.composition_client) |*client| _ = client.close();
+    }
     return app.run();
 }
 
@@ -1874,7 +1992,11 @@ fn checkNativeDialog(app: *App) !void {
     app.saveFromDialog();
     if (app.dirty or !std.mem.eql(u8, spanZ(&app.current_path), spanZ(&second))) return error.LongSaveNotCommitted;
     app.dialog = .save_as;
-    if (!app.loadDirectory()) return error.DirectoryPage;
+    if (!app.loadDirectory()) {
+        var detail: [80]u8 = undefined;
+        app.ctx.sys.println(try std.fmt.bufPrint(&detail, "NOTEPAD picker result={d}", .{app.directory_page.last_error}));
+        return error.DirectoryPage;
+    }
     var found = false;
     for (app.directory_page.rows[0..app.directory_page.count], 0..) |row, index| {
         if (!r4os.bounded_text.valid(spanZ(&row.label))) return error.SplitLabel;
@@ -1915,9 +2037,21 @@ fn checkNativeDialog(app: *App) !void {
         app.ctx.sys.dirDelete(directory) <= 0) return error.PrivateCleanup;
 }
 
+fn checkCompositionControl(app: *App) !void {
+    const before = try app.ctx.sys.allocator().dupe(u8, app.editor.value());
+    defer app.ctx.sys.allocator().free(before);
+    const revision = app.text_revision;
+    app.probeComposition();
+    if (app.composition_status != r4os.abi.composition_error_no_provider) return error.ExpectedNoProvider;
+    if (!std.mem.eql(u8, before, app.editor.value()) or revision != app.text_revision or app.composition.phase != 0) return error.UncommittedTextMutation;
+}
+
 fn runDialogTextSelfTest(ctx: *AppApi) i32 {
     var storage = App{ .ctx = ctx };
     const app = &storage;
+    defer {
+        if (app.composition_client) |*client| _ = client.close();
+    }
     checkDialogText(app) catch |err| {
         ctx.sys.write("NOTEPAD Unicode dialog selftest FAILED: ");
         ctx.sys.println(@errorName(err));
@@ -1929,7 +2063,12 @@ fn runDialogTextSelfTest(ctx: *AppApi) i32 {
         ctx.sys.println(@errorName(err));
         return 1;
     };
-    ctx.sys.println("NOTEPAD Unicode dialog selftest: OK codepoints=whole capacity=retained save=exact labels=separate cleanup=complete");
+    checkCompositionControl(app) catch |err| {
+        ctx.sys.write("NOTEPAD composition selftest FAILED: ");
+        ctx.sys.println(@errorName(err));
+        return 1;
+    };
+    ctx.sys.println("NOTEPAD Unicode dialog selftest: OK codepoints=whole capacity=retained save=exact labels=separate cleanup=complete IME=NoProvider");
     return 0;
 }
 
